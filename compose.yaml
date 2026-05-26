@@ -1,0 +1,19 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: page-automation-bot
+    restart: unless-stopped
+    init: true
+    shm_size: "1gb"
+    env_file:
+      - .env
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      PLAYWRIGHT_HEADLESS: "true"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    command: ["python", "-m", "app.main"]

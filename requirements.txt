@@ -1,0 +1,6 @@
+python-telegram-bot
+playwright
+yt-dlp
+python-dotenv
+pydantic-settings
+pytest

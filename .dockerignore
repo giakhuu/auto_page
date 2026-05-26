@@ -1,0 +1,15 @@
+.git
+.gitignore
+.venv
+.pytest_cache
+.planning
+.codex
+.agents
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+logs
+data
+remote_codex_bot.log
+skills-lock.json
