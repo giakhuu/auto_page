@@ -24,3 +24,25 @@ def test_job_status_updates_refresh_timestamp_and_error_message() -> None:
     assert job.error_message == "network error"
     assert job.updated_at >= before
     assert job.is_terminal is True
+
+
+def test_job_builds_clip_caption_labels() -> None:
+    first = Job(
+        source_url="https://example.com/video",
+        clip_start_seconds=0,
+        clip_end_seconds=90,
+        clip_index=0,
+        clip_total=2,
+    )
+    last = Job(
+        source_url="https://example.com/video",
+        clip_start_seconds=90,
+        clip_end_seconds=180,
+        clip_index=1,
+        clip_total=2,
+    )
+
+    assert first.clip_label == "Phần 1"
+    assert first.build_clip_caption("Caption here") == "Caption here\n\nPhần 1"
+    assert last.clip_label == "Phần 2"
+    assert last.build_clip_caption("") == "Phần 2"

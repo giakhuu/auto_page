@@ -16,10 +16,11 @@ class TelegramJobNotifier:
 
     def build_job_result_message(self, job: Job) -> str:
         """Render the final operator-facing message for a completed job."""
+        label_prefix = f"{job.clip_label}\n" if job.clip_label else ""
         if job.status is JobStatus.PUBLISHED:
             return "\n".join(
                 [
-                    "Publish job completed.",
+                    f"{label_prefix}Publish job completed.",
                     f"Job ID: {job.job_id}",
                     f"Status: {job.status.value}",
                     f"Post URL: {job.facebook_post_url or '(unavailable)'}",
@@ -29,7 +30,7 @@ class TelegramJobNotifier:
         if job.status is JobStatus.SCHEDULED:
             return "\n".join(
                 [
-                    "Publish job scheduled.",
+                    f"{label_prefix}Publish job scheduled.",
                     f"Job ID: {job.job_id}",
                     f"Status: {job.status.value}",
                     f"Scheduled at: {job.scheduled_at.isoformat() if job.scheduled_at else '(unavailable)'}",
@@ -38,7 +39,7 @@ class TelegramJobNotifier:
 
         return "\n".join(
             [
-                "Publish job failed.",
+                f"{label_prefix}Publish job failed.",
                 f"Job ID: {job.job_id}",
                 f"Status: {job.status.value}",
                 f"Error: {job.error_message or 'Unknown error'}",

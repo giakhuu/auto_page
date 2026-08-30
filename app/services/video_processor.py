@@ -47,6 +47,11 @@ class VideoProcessor:
         """Return the deterministic MP4 output path for a processed download."""
         return input_path.with_name(f"{input_path.stem}-processed.mp4")
 
+    @staticmethod
+    def build_clip_output_path(input_path: Path, clip_index: int) -> Path:
+        """Return the deterministic MP4 path for one trimmed clip."""
+        return input_path.with_name(f"{input_path.stem}-clip-{clip_index + 1:03d}.mp4")
+
     def has_audio_stream(self, input_path: Path) -> bool:
         """Return whether FFprobe can see at least one audio stream."""
         command = [
@@ -105,6 +110,31 @@ class VideoProcessor:
             "23",
             "-movflags",
             "+faststart",
+            str(output_path),
+        ]
+
+    @staticmethod
+    def build_trim_command(
+        ffmpeg_binary: str,
+        input_path: Path,
+        output_path: Path,
+        start_seconds: int,
+        end_seconds: int,
+    ) -> list[str]:
+        """Build the FFmpeg command that cuts one clip interval."""
+        return [
+            ffmpeg_binary,
+            "-y",
+            "-ss",
+            str(start_seconds),
+            "-to",
+            str(end_seconds),
+            "-i",
+            str(input_path),
+            "-c",
+            "copy",
+            "-avoid_negative_ts",
+            "make_zero",
             str(output_path),
         ]
 
@@ -193,3 +223,71 @@ class VideoProcessor:
             },
         )
         return processed
+
+    def trim(
+        self,
+        input_path: Path,
+        start_seconds: int,
+        end_seconds: int,
+        clip_index: int,
+        job: Job | None = None,
+    ) -> VideoProcessingResult:
+        """Create one MP4 clip from the requested source interval."""
+        logger = self.build_logger(job)
+        input_path = Path(input_path)
+        if not input_path.exists():
+            raise VideoProcessingError(f"Downloaded video does not exist: {input_path}")
+        if end_seconds <= start_seconds:
+            raise VideoProcessingError("Clip end time must be greater than start time.")
+
+        output_path = self.build_clip_output_path(input_path, clip_index)
+        if output_path.exists():
+            output_path.unlink()
+
+        logger.info(
+            "starting video trim",
+            extra={
+                "input_path": str(input_path),
+                "start_seconds": start_seconds,
+                "end_seconds": end_seconds,
+                "clip_index": clip_index,
+            },
+        )
+
+        command = self.build_trim_command(
+            self.ffmpeg_binary,
+            input_path,
+            output_path,
+            start_seconds,
+            end_seconds,
+        )
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode != 0 or not output_path.exists():
+            if output_path.exists():
+                output_path.unlink()
+            detail = (result.stderr or result.stdout or "FFmpeg did not produce a trimmed video.").strip()
+            raise VideoProcessingError(f"Video trim failed: {detail}")
+
+        duration_seconds, file_size_bytes = self.probe_metadata(output_path)
+        trimmed = VideoProcessingResult(
+            video_path=output_path,
+            filename=output_path.name,
+            duration_seconds=duration_seconds,
+            file_size_bytes=file_size_bytes,
+        )
+
+        if job is not None:
+            job.download_path = trimmed.video_path
+            job.download_filename = trimmed.filename
+            job.download_duration_seconds = trimmed.duration_seconds
+            job.download_file_size_bytes = trimmed.file_size_bytes
+
+        logger.info(
+            "video trim completed",
+            extra={
+                "output_path": str(trimmed.video_path),
+                "duration_seconds": trimmed.duration_seconds,
+                "file_size_bytes": trimmed.file_size_bytes,
+            },
+        )
+        return trimmed

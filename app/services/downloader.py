@@ -45,13 +45,34 @@ class VideoDownloader:
     def build_options(self) -> dict[str, Any]:
         """Build yt-dlp options from shared application settings."""
         output_template = self.settings.download_dir / "%(id)s.%(ext)s"
-        return {
+        options: dict[str, Any] = {
             "outtmpl": str(output_template),
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
             "windowsfilenames": True,
+            "retries": 5,
+            "fragment_retries": 5,
+            "file_access_retries": 3,
+            "socket_timeout": 30,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "ios", "mweb", "web"],
+                }
+            },
         }
+
+        if self.settings.ytdlp_cookiefile and self.settings.ytdlp_cookiefile.exists():
+            options["cookiefile"] = str(self.settings.ytdlp_cookiefile)
+        elif (self.settings.session_dir / "cookies.txt").exists():
+            options["cookiefile"] = str(self.settings.session_dir / "cookies.txt")
+        elif (Path("data") / "cookies.txt").exists():
+            options["cookiefile"] = str(Path("data") / "cookies.txt")
+
+        if self.settings.ytdlp_cookies_from_browser:
+            options["cookiesfrombrowser"] = (self.settings.ytdlp_cookies_from_browser,)
+
+        return options
 
     @classmethod
     def normalize_filename(cls, title: str | None, video_id: str | None, extension: str | None) -> str:
@@ -88,11 +109,22 @@ class VideoDownloader:
     @staticmethod
     def extract_caption(info: dict[str, Any]) -> str:
         """Return only the source post caption from downloader metadata."""
-        candidates = (
-            info.get("description"),
-            info.get("fulltitle"),
-            info.get("title"),
+        extractor = " ".join(
+            str(value or "").lower()
+            for value in (info.get("extractor"), info.get("extractor_key"), info.get("webpage_url_domain"))
         )
+        if "youtube" in extractor or "youtu.be" in extractor:
+            candidates = (
+                info.get("fulltitle"),
+                info.get("title"),
+                info.get("description"),
+            )
+        else:
+            candidates = (
+                info.get("description"),
+                info.get("fulltitle"),
+                info.get("title"),
+            )
         for candidate in candidates:
             if not isinstance(candidate, str):
                 continue
@@ -202,5 +234,5 @@ class VideoDownloader:
             detail = self.describe_error(error)
             if job is not None:
                 job.set_status(JobStatus.FAILED, error_message=detail)
-            logger.error("download failed: %s", detail)
+            logger.error("download failed: %s (raw error: %s)", detail, str(error).strip())
             raise DownloaderError(detail) from error

@@ -39,14 +39,14 @@ class FakeDownloader:
                 job.set_status(JobStatus.FAILED, error_message="Download failed")
             raise RuntimeError("Download failed")
 
+        download_path = self.tmp_path / "downloads" / "clip.mp4"
+        download_path.parent.mkdir(parents=True, exist_ok=True)
+        download_path.write_text("video", encoding="utf-8")
         if job is not None:
-            download_path = self.tmp_path / "downloads" / "clip.mp4"
-            download_path.parent.mkdir(parents=True, exist_ok=True)
-            download_path.write_text("video", encoding="utf-8")
             job.download_path = download_path
             job.download_filename = "clip.mp4"
             job.set_status(JobStatus.DOWNLOADED)
-        return SimpleNamespace(caption="Caption here", title="Demo title")
+        return SimpleNamespace(download_path=download_path, caption="Caption here", title="Demo title")
 
 
 class FakePublisher:
@@ -68,7 +68,7 @@ class FakePublisher:
             raise RuntimeError("Publish failed")
 
         job.facebook_post_url = "https://facebook.com/example/posts/123"
-        job.set_status(JobStatus.PUBLISHED)
+        job.set_status(JobStatus.SCHEDULED if job.publish_mode == "scheduled" else JobStatus.PUBLISHED)
         return job
 
 
@@ -84,6 +84,25 @@ class FakeCaptionEditor:
 class FakeVideoProcessor:
     def __init__(self) -> None:
         self.calls: list[Path] = []
+        self.trim_calls: list[tuple[Path, int, int, int]] = []
+
+    def trim(
+        self,
+        input_path: Path,
+        start_seconds: int,
+        end_seconds: int,
+        clip_index: int,
+        job: Job | None = None,
+    ):
+        self.trim_calls.append((input_path, start_seconds, end_seconds, clip_index))
+        clip_path = input_path.with_name(f"{input_path.stem}-clip-{clip_index + 1:03d}.mp4")
+        clip_path.write_text("clip", encoding="utf-8")
+        if job is not None:
+            job.download_path = clip_path
+            job.download_filename = clip_path.name
+            job.download_duration_seconds = float(end_seconds - start_seconds)
+            job.download_file_size_bytes = clip_path.stat().st_size
+        return job
 
     def process(self, input_path: Path, job: Job | None = None):
         self.calls.append(input_path)
@@ -168,6 +187,69 @@ def test_orchestrator_persists_auto_schedule_slot_after_success(tmp_path: Path) 
     assert "last_slot_index=2" in content
     assert f"last_job_id={job.job_id}" in content
     assert "scheduled_slot=2026-05-03 12:30" in content
+
+
+def test_orchestrator_runs_clip_batch_from_single_download(tmp_path: Path) -> None:
+    settings = build_settings(tmp_path)
+    job_manager = JobManager()
+    downloader = FakeDownloader(tmp_path)
+    video_processor = FakeVideoProcessor()
+    publisher = FakePublisher()
+    bot = FakeBot()
+    orchestrator = JobOrchestrator(
+        settings=settings,
+        job_manager=job_manager,
+        downloader=downloader,
+        video_processor=video_processor,
+        publisher=publisher,
+        job_store=JobStore(settings),
+        notifier=TelegramJobNotifier(),
+        caption_editor=FakeCaptionEditor(),
+        page_session_factory=fake_page_session,
+    )
+    jobs = [
+        job_manager.create_job(
+            "https://example.com/video",
+            publish_mode="scheduled",
+            scheduled_at=datetime(2026, 5, 3, 12, 0, tzinfo=timezone.utc),
+            auto_schedule_slot_index=1,
+            clip_start_seconds=0,
+            clip_end_seconds=90,
+            clip_index=0,
+            clip_total=2,
+            clip_group_id="group",
+        ),
+        job_manager.create_job(
+            "https://example.com/video",
+            publish_mode="scheduled",
+            scheduled_at=datetime(2026, 5, 3, 12, 30, tzinfo=timezone.utc),
+            auto_schedule_slot_index=2,
+            clip_start_seconds=90,
+            clip_end_seconds=180,
+            clip_index=1,
+            clip_total=2,
+            clip_group_id="group",
+        ),
+    ]
+
+    result = asyncio.run(orchestrator.run_clip_batch(jobs, bot=bot, chat_id=321))
+
+    assert downloader.calls == ["https://example.com/video"]
+    assert [(start, end, index) for _, start, end, index in video_processor.trim_calls] == [
+        (0, 90, 0),
+        (90, 180, 1),
+    ]
+    assert publisher.download_filenames == ["clip-clip-001-processed.mp4", "clip-clip-002-processed.mp4"]
+    assert [job.caption for job in jobs] == ["Edited: Caption here\n\nPhần 1", "Edited: Caption here\n\nPhần 2"]
+    assert [job.status for job in jobs] == [JobStatus.SCHEDULED, JobStatus.SCHEDULED]
+    assert len(result.persisted_record_paths) == 2
+    assert len(bot.messages) == 2
+    assert "Phần 1" in bot.messages[0][1]
+    assert "Phần 2" in bot.messages[1][1]
+    assert job_manager.active_job_id is None
+    assert not (tmp_path / "downloads" / "clip.mp4").exists()
+    assert not (tmp_path / "downloads" / "clip-clip-001.mp4").exists()
+    assert not (tmp_path / "downloads" / "clip-clip-001-processed.mp4").exists()
 
 
 def test_orchestrator_edits_source_caption_only_when_job_caption_is_empty(tmp_path: Path) -> None:

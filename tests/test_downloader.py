@@ -76,6 +76,42 @@ def test_build_options_targets_download_dir(monkeypatch, tmp_path: Path) -> None
 
     assert str(tmp_path / "downloads") in options["outtmpl"]
     assert options["noplaylist"] is True
+    assert options["retries"] == 5
+    assert options["extractor_args"]["youtube"]["player_client"] == ["android", "ios", "mweb", "web"]
+
+
+def test_build_options_resolves_cookiefile(monkeypatch, tmp_path: Path) -> None:
+    cookie_path = tmp_path / "custom_cookies.txt"
+    cookie_path.write_text("fake cookies", encoding="utf-8")
+    settings = build_settings(tmp_path)
+    settings.ytdlp_cookiefile = cookie_path
+    downloader = VideoDownloader(settings)
+
+    options = downloader.build_options()
+    assert options.get("cookiefile") == str(cookie_path)
+
+
+def test_build_options_resolves_cookies_from_browser(monkeypatch, tmp_path: Path) -> None:
+    settings = build_settings(tmp_path)
+    settings.ytdlp_cookies_from_browser = "chrome"
+    downloader = VideoDownloader(settings)
+
+    options = downloader.build_options()
+    assert options.get("cookiesfrombrowser") == ("chrome",)
+
+
+def test_build_options_auto_detects_session_cookies_txt(monkeypatch, tmp_path: Path) -> None:
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    session_cookie = session_dir / "cookies.txt"
+    session_cookie.write_text("session cookies", encoding="utf-8")
+
+    settings = build_settings(tmp_path)
+    downloader = VideoDownloader(settings)
+
+    options = downloader.build_options()
+    assert options.get("cookiefile") == str(session_cookie)
+
 
 
 def test_download_returns_local_path_from_prepared_filename(monkeypatch, tmp_path: Path) -> None:
@@ -103,6 +139,19 @@ def test_extract_caption_prefers_clean_description_over_metadata() -> None:
     }
 
     assert VideoDownloader.extract_caption(info) == "Caption goc cua bai viet"
+
+
+def test_extract_caption_prefers_youtube_title_over_description() -> None:
+    info = {
+        "extractor": "youtube",
+        "title": "Kết Hôn Giả Với Tổng Tài",
+        "description": (
+            "💕Subscribe kênh tại đây để theo dõi những bộ phim mới nhất\n\n"
+            "#phimngắn #phimhay #shortdrama #chinesedrama"
+        ),
+    }
+
+    assert VideoDownloader.extract_caption(info) == "Kết Hôn Giả Với Tổng Tài"
 
 
 def test_download_replaces_existing_normalized_file(monkeypatch, tmp_path: Path) -> None:

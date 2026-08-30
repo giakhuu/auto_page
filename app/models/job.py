@@ -47,6 +47,11 @@ class Job:
     publish_mode: str = "publish"
     scheduled_at: datetime | None = None
     auto_schedule_slot_index: int | None = None
+    clip_start_seconds: int | None = None
+    clip_end_seconds: int | None = None
+    clip_index: int | None = None
+    clip_total: int | None = None
+    clip_group_id: str | None = None
 
     def __post_init__(self) -> None:
         """Keep the initial timestamps aligned until the first mutation."""
@@ -62,3 +67,30 @@ class Job:
     def is_terminal(self) -> bool:
         """Return whether the job already reached a terminal state."""
         return self.status in {JobStatus.PUBLISHED, JobStatus.SCHEDULED, JobStatus.FAILED}
+
+    @property
+    def is_clip_job(self) -> bool:
+        """Return whether this job publishes one segment from a larger source video."""
+        return (
+            self.clip_start_seconds is not None
+            and self.clip_end_seconds is not None
+            and self.clip_index is not None
+            and self.clip_total is not None
+        )
+
+    @property
+    def clip_label(self) -> str:
+        """Return the operator-facing label for this clip segment."""
+        if not self.is_clip_job:
+            return ""
+        return f"Phần {self.clip_index + 1}"
+
+    def build_clip_caption(self, base_caption: str = "") -> str:
+        """Append the clip label to a base caption."""
+        label = self.clip_label
+        caption = base_caption.strip()
+        if not label:
+            return caption
+        if not caption:
+            return label
+        return f"{caption}\n\n{label}"

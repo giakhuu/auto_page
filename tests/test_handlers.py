@@ -75,6 +75,42 @@ def test_parse_publish_request_supports_optional_caption() -> None:
 
     assert request.source_url == "https://example.com/video"
     assert request.caption == "Hello world"
+    assert request.clip_segments == ()
+
+
+def test_parse_publish_request_supports_timestamp_segments() -> None:
+    request = parse_publish_request("publish https://example.com/video | 00:00, 01:30, 03:00")
+
+    assert request.source_url == "https://example.com/video"
+    assert request.caption == ""
+    assert [(segment.start_seconds, segment.end_seconds) for segment in request.clip_segments] == [
+        (0, 90),
+        (90, 180),
+    ]
+
+
+def test_parse_publish_request_supports_timestamp_segments_and_caption() -> None:
+    request = parse_publish_request("publish https://example.com/video | 00:00, 01:30, 03:00 | Caption here")
+
+    assert request.caption == "Caption here"
+    assert [(segment.start_seconds, segment.end_seconds) for segment in request.clip_segments] == [
+        (0, 90),
+        (90, 180),
+    ]
+
+
+def test_parse_publish_request_rejects_invalid_timestamp_segments() -> None:
+    for text in (
+        "publish https://example.com/video | 00:00",
+        "publish https://example.com/video | 00:30, 00:20",
+        "publish https://example.com/video | 00:70, 01:30",
+    ):
+        try:
+            parse_publish_request(text)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"Expected timestamp parsing to reject {text}")
 
 
 def test_parse_publish_request_rejects_invalid_url() -> None:
@@ -228,6 +264,42 @@ def test_publish_command_hands_job_to_orchestrator_after_acknowledgement() -> No
     assert len(orchestrator.calls) == 1
     assert all(call[2] == 555 for call in orchestrator.calls)
     assert all(call[0].publish_mode == "scheduled" for call in orchestrator.calls)
+
+
+def test_publish_command_creates_clip_batch_jobs_in_order() -> None:
+    class FakeOrchestrator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[list[object], object, int | None]] = []
+
+        async def run_clip_batch(self, jobs, bot=None, chat_id=None):
+            self.calls.append((jobs, bot, chat_id))
+            return jobs
+
+    async def scenario() -> tuple[str, list[object], FakeOrchestrator]:
+        job_manager = JobManager()
+        orchestrator = FakeOrchestrator()
+        update = build_update(
+            "/publish https://example.com/video | 00:00, 01:30, 03:00 | Caption here",
+            user_id=123,
+        )
+        context = build_context(build_settings(), job_manager=job_manager, orchestrator=orchestrator)
+
+        await publish_command(update, context)
+        await asyncio.gather(*context.application.created_tasks)
+        return update.effective_message.replies[0], job_manager.list_jobs(), orchestrator
+
+    reply, stored_jobs, orchestrator = asyncio.run(scenario())
+
+    assert "Queued auto-scheduled clip batch created." in reply
+    assert "Clip count: 2" in reply
+    assert len(stored_jobs) == 2
+    assert len(orchestrator.calls) == 1
+    assert orchestrator.calls[0][2] == 555
+    assert {job.clip_group_id for job in stored_jobs}
+    assert len({job.clip_group_id for job in stored_jobs}) == 1
+    assert [(job.clip_start_seconds, job.clip_end_seconds) for job in stored_jobs] == [(0, 90), (90, 180)]
+    assert [job.clip_label for job in stored_jobs] == ["Phần 1", "Phần 2"]
+    assert stored_jobs[1].auto_schedule_slot_index == (stored_jobs[0].auto_schedule_slot_index + 1) % 5
 
 
 def test_parse_schedule_request_supports_future_time_url_and_caption() -> None:

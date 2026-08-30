@@ -43,6 +43,27 @@ def test_job_store_writes_json_snapshot_with_artifact_refs(tmp_path: Path) -> No
     assert job.persisted_record_path == record_path
 
 
+def test_job_store_persists_clip_metadata(tmp_path: Path) -> None:
+    settings = build_settings(tmp_path)
+    store = JobStore(settings)
+    job = Job(
+        source_url="https://example.com/video",
+        clip_start_seconds=0,
+        clip_end_seconds=90,
+        clip_index=0,
+        clip_total=2,
+        clip_group_id="clip-group",
+    )
+
+    payload = store.build_record(job)
+
+    assert payload["clip_start_seconds"] == 0
+    assert payload["clip_end_seconds"] == 90
+    assert payload["clip_index"] == 0
+    assert payload["clip_total"] == 2
+    assert payload["clip_group_id"] == "clip-group"
+
+
 def test_job_store_extracts_publish_failure_screenshot_from_error_text(tmp_path: Path) -> None:
     settings = build_settings(tmp_path)
     store = JobStore(settings)

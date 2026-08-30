@@ -30,11 +30,39 @@ def test_video_processor_builds_fixed_10fps_1_1x_command() -> None:
     assert "aac" in command
 
 
+def test_video_processor_builds_trim_command() -> None:
+    command = VideoProcessor.build_trim_command(
+        "ffmpeg",
+        Path("input.mp4"),
+        Path("clip.mp4"),
+        start_seconds=30,
+        end_seconds=90,
+    )
+
+    assert command == [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        "30",
+        "-to",
+        "90",
+        "-i",
+        "input.mp4",
+        "-c",
+        "copy",
+        "-avoid_negative_ts",
+        "make_zero",
+        "clip.mp4",
+    ]
+
+
 def test_video_processor_creates_processed_mp4_and_updates_job(tmp_path: Path) -> None:
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
         pytest.skip("ffmpeg and ffprobe are required for video processing verification")
 
     source = ROOT / "data" / "tmp" / "reel-upload-smoke.mp4"
+    if not source.exists():
+        pytest.skip("smoke test source video is not available")
     input_path = tmp_path / "clip.mp4"
     shutil.copyfile(source, input_path)
     job = Job(

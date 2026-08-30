@@ -21,6 +21,11 @@ class JobManager:
         publish_mode: str = "publish",
         scheduled_at: datetime | None = None,
         auto_schedule_slot_index: int | None = None,
+        clip_start_seconds: int | None = None,
+        clip_end_seconds: int | None = None,
+        clip_index: int | None = None,
+        clip_total: int | None = None,
+        clip_group_id: str | None = None,
     ) -> Job:
         """Create and store a new queued job."""
         job = Job(
@@ -29,6 +34,11 @@ class JobManager:
             publish_mode=publish_mode,
             scheduled_at=scheduled_at,
             auto_schedule_slot_index=auto_schedule_slot_index,
+            clip_start_seconds=clip_start_seconds,
+            clip_end_seconds=clip_end_seconds,
+            clip_index=clip_index,
+            clip_total=clip_total,
+            clip_group_id=clip_group_id,
         )
         self._jobs[job.job_id] = job
         return job

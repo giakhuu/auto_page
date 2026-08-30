@@ -57,6 +57,28 @@ class Settings(BaseSettings):
     )
     log_dir: Path = Field(default=Path("logs"), alias="LOG_DIR")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    ytdlp_cookiefile: Path | None = Field(default=None, alias="YTDLP_COOKIEFILE")
+    ytdlp_cookies_from_browser: str | None = Field(default=None, alias="YTDLP_COOKIES_FROM_BROWSER")
+
+    @field_validator("ytdlp_cookiefile", mode="before")
+    @classmethod
+    def parse_optional_path(cls, value: Any) -> Path | None:
+        """Normalize optional configured paths into Path objects."""
+        if value in (None, ""):
+            return None
+        if isinstance(value, Path):
+            return value
+        raw = str(value).strip()
+        return Path(raw).expanduser() if raw else None
+
+    @field_validator("ytdlp_cookies_from_browser", mode="before")
+    @classmethod
+    def parse_optional_string(cls, value: Any) -> str | None:
+        """Normalize optional string configurations."""
+        if value in (None, ""):
+            return None
+        raw = str(value).strip()
+        return raw or None
 
     @field_validator("telegram_allowed_user_ids", mode="before")
     @classmethod
